@@ -178,6 +178,8 @@ document.head.appendChild(style);
 
 // --- 定数 ---
 const SILENCE_THRESHOLD = 5;
+// meet.google.com/xxx-yyyy-zzz からルームIDを取得
+const ROOM_ID = location.pathname.replace('/', '');
 
 function getBackendUrl()  { return localStorage.getItem('pacemakerBackendUrl')  || 'http://localhost:8787'; }
 function getApiSecret()   { return localStorage.getItem('pacemakerApiSecret')   || ''; }
@@ -274,7 +276,7 @@ if (SpeechRecognition) {
     apiFetch('/api/speed', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userName: MY_NAME, cps })
+      body: JSON.stringify({ userName: MY_NAME, cps, roomId: ROOM_ID })
     }).catch(e => console.log('CPS送信失敗:', e));
   }
 
@@ -344,7 +346,7 @@ if (SpeechRecognition) {
 // --- ポーリング ---
 setInterval(async () => {
   try {
-    const res = await apiFetch('/api/room-status');
+    const res = await apiFetch(`/api/room-status?roomId=${encodeURIComponent(ROOM_ID)}`);
     const data = await res.json();
 
     const speakerEl  = document.getElementById('speaker-name');
@@ -400,7 +402,11 @@ setInterval(async () => {
 // --- 待ってボタン ---
 document.getElementById('wait-btn')?.addEventListener('click', async () => {
   try {
-    await apiFetch('/api/wait', { method: 'POST' });
+    await apiFetch('/api/wait', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId: ROOM_ID }),
+    });
   } catch (e) {
     console.error('「待って」の送信に失敗しました:', e);
   }
