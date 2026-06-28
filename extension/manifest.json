@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "ウサペース",
+  "name": "ペースメーカー",
   "version": "1.0",
   "description": "Google Meetの画面にうさぎを表示するツール",
   "permissions": [],
