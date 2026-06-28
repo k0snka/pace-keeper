@@ -3,7 +3,7 @@
   "name": "ペースメーカー",
   "version": "1.0",
   "description": "Google Meetの画面にうさぎを表示するツール",
-  "permissions": [],
+  "permissions": ["microphone"],
   "content_scripts": [
     {
       "matches": ["https://meet.google.com/*"],

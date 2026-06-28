@@ -111,14 +111,18 @@ if (SpeechRecognition) {
   let lastInterimChars = 0;
   let charHistory = []; // {time, delta} の直近履歴
   const SEND_INTERVAL_MS = 500;
-  const WINDOW_MS = 3000; // 直近3秒でCPSを計算
+  const WINDOW_MS = 3000;  // 直近3秒でCPSを計算
+  const WARMUP_MS = 2000;  // 発話開始から2秒間は送信しない
 
   function computeCps(now) {
     charHistory = charHistory.filter(e => now - e.time <= WINDOW_MS);
     if (charHistory.length < 2) return null;
     const duration = (now - charHistory[0].time) / 1000;
     const total = charHistory.reduce((s, e) => s + e.delta, 0);
-    return duration > 0.3 ? Math.round(total / duration) : null;
+    if (duration < 0.3) return null;
+    // ウォームアップ期間中はnullを返して送信を抑制
+    if (now - charHistory[0].time < WARMUP_MS) return null;
+    return Math.round(total / duration);
   }
 
   function sendCps(cps) {
