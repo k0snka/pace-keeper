@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ペースメーカー",
+  "name": "PaceKeeper",
   "version": "1.0",
-  "description": "Google Meetの画面にうさぎを表示するツール",
+  "description": "Web会議の話す速度をお互いに思いやるツール",
   "permissions": ["microphone"],
   "content_scripts": [
     {
