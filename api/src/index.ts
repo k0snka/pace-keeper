@@ -22,15 +22,27 @@ app.use('/api/*', async (c, next) => {
 
 // 全リクエストを対応するルームのDurable Objectに転送
 app.all('/api/*', async (c) => {
-  const roomId = c.req.method === 'GET'
-    ? c.req.query('roomId')
-    : (await c.req.json().catch(() => ({}))).roomId
+  let roomId: string | undefined
+  let forwarded: Request
+
+  if (c.req.method === 'GET') {
+    roomId = c.req.query('roomId')
+    forwarded = c.req.raw
+  } else {
+    const body = await c.req.json().catch(() => ({}))
+    roomId = body.roomId
+    // bodyを読み終えているので再構築して転送
+    forwarded = new Request(c.req.raw, {
+      body: JSON.stringify(body),
+      headers: c.req.raw.headers,
+    })
+  }
 
   if (!roomId) return c.json({ error: 'roomId is required' }, 400)
 
   const id = c.env.ROOMS.idFromName(roomId)
   const obj = c.env.ROOMS.get(id)
-  return obj.fetch(c.req.raw)
+  return obj.fetch(forwarded)
 })
 
 export default app
