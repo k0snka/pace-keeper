@@ -1,14 +1,16 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
-type Bindings = { API_SECRET: string }
+// --- Bindings ---
+type Bindings = {
+  API_SECRET: string
+  ROOMS: DurableObjectNamespace
+}
 
+// --- Router ---
 const app = new Hono<{ Bindings: Bindings }>()
 
-app.use('/*', cors({
-  origin: '*',
-  allowMethods: ['GET', 'POST'],
-}))
+app.use('/*', cors({ origin: '*', allowMethods: ['GET', 'POST'] }))
 
 app.use('/api/*', async (c, next) => {
   const secret = c.env.API_SECRET
@@ -18,128 +20,136 @@ app.use('/api/*', async (c, next) => {
   await next()
 })
 
-// --- ルームごとの状態 ---
-type RoomState = {
+// 全リクエストを対応するルームのDurable Objectに転送
+app.all('/api/*', async (c) => {
+  const roomId = c.req.method === 'GET'
+    ? c.req.query('roomId')
+    : (await c.req.json().catch(() => ({}))).roomId
+
+  if (!roomId) return c.json({ error: 'roomId is required' }, 400)
+
+  const id = c.env.ROOMS.idFromName(roomId)
+  const obj = c.env.ROOMS.get(id)
+  return obj.fetch(c.req.raw)
+})
+
+export default app
+
+// --- Durable Object ---
+const EXPIRE_TIME = 5000
+
+type State = {
   currentSpeaker: string
   speakerCps: number
   lastSpeakerTime: number
   clickTimestamps: number[]
-  speakingTime: Map<string, number>
-  lastSpeedUpdate: Map<string, number>
-  lastAccessTime: number
+  speakingTime: Record<string, number>
+  lastSpeedUpdate: Record<string, number>
 }
 
-const rooms = new Map<string, RoomState>()
-const EXPIRE_TIME = 5000
-const ROOM_TTL = 1000 * 60 * 30 // 30分間アクセスがないルームを削除
+export class RoomObject {
+  state: DurableObjectState
+  s: State
 
-function getRoom(roomId: string): RoomState {
-  if (!rooms.has(roomId)) {
-    rooms.set(roomId, {
+  constructor(state: DurableObjectState) {
+    this.state = state
+    this.s = {
       currentSpeaker: '誰も話していません',
       speakerCps: 0,
       lastSpeakerTime: 0,
       clickTimestamps: [],
-      speakingTime: new Map(),
-      lastSpeedUpdate: new Map(),
-      lastAccessTime: Date.now(),
+      speakingTime: {},
+      lastSpeedUpdate: {},
+    }
+    // 再起動時にストレージから復元
+    this.state.blockConcurrencyWhile(async () => {
+      const saved = await this.state.storage.get<State>('s')
+      if (saved) this.s = saved
     })
   }
-  const room = rooms.get(roomId)!
-  room.lastAccessTime = Date.now()
-  return room
-}
 
-function cleanupRooms() {
-  const now = Date.now()
-  for (const [id, room] of rooms.entries()) {
-    if (now - room.lastAccessTime > ROOM_TTL) rooms.delete(id)
-  }
-}
-
-function getActiveWaitCount(room: RoomState): number {
-  const now = Date.now()
-  room.clickTimestamps = room.clickTimestamps.filter(t => now - t < EXPIRE_TIME)
-  return room.clickTimestamps.length
-}
-
-function getSpeakingShares(room: RoomState): Record<string, number> {
-  const total = Array.from(room.speakingTime.values()).reduce((a, b) => a + b, 0)
-  if (total === 0) return {}
-  return Object.fromEntries(
-    Array.from(room.speakingTime.entries())
-      .map(([k, v]) => [k, Math.round(v / total * 100)])
-      .sort((a, b) => (b[1] as number) - (a[1] as number))
-  )
-}
-
-app.get('/api/room-status', (c) => {
-  const roomId = c.req.query('roomId')
-  if (!roomId) return c.json({ error: 'roomId is required' }, 400)
-
-  cleanupRooms()
-  const room = getRoom(roomId)
-  const now = Date.now()
-
-  if (now - room.lastSpeakerTime > 3000) {
-    room.currentSpeaker = '誰も話していません'
-    room.speakerCps = 0
+  async save() {
+    await this.state.storage.put('s', this.s)
   }
 
-  const silenceDuration = room.lastSpeakerTime > 0 ? Math.floor((now - room.lastSpeakerTime) / 1000) : null
-  const waitCount = getActiveWaitCount(room)
+  getActiveWaitCount(): number {
+    const now = Date.now()
+    this.s.clickTimestamps = this.s.clickTimestamps.filter(t => now - t < EXPIRE_TIME)
+    return this.s.clickTimestamps.length
+  }
 
-  return c.json({
-    waitCount,
-    currentSpeaker: room.currentSpeaker,
-    speakerCps: room.speakerCps,
-    speedLevel: room.speakerCps === 0 ? 'stop' : room.speakerCps > 7 ? 'fast' : 'normal',
-    status: waitCount > 3 ? '🚨限界' : waitCount > 0 ? '✋少し待って' : '👍快適',
-    speakingShares: getSpeakingShares(room),
-    silenceDuration,
-  })
-})
+  getSpeakingShares(): Record<string, number> {
+    const total = Object.values(this.s.speakingTime).reduce((a, b) => a + b, 0)
+    if (total === 0) return {}
+    return Object.fromEntries(
+      Object.entries(this.s.speakingTime)
+        .map(([k, v]) => [k, Math.round(v / total * 100)])
+        .sort((a, b) => (b[1] as number) - (a[1] as number))
+    )
+  }
 
-app.post('/api/speed', async (c) => {
-  const body = await c.req.json<{ userName: string, cps: number, roomId: string }>()
-  if (!body.roomId) return c.json({ error: 'roomId is required' }, 400)
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+    const now = Date.now()
 
-  const room = getRoom(body.roomId)
-  const now = Date.now()
+    if (request.method === 'GET' && url.pathname === '/api/room-status') {
+      if (now - this.s.lastSpeakerTime > 3000) {
+        this.s.currentSpeaker = '誰も話していません'
+        this.s.speakerCps = 0
+      }
+      const waitCount = this.getActiveWaitCount()
+      const silenceDuration = this.s.lastSpeakerTime > 0
+        ? Math.floor((now - this.s.lastSpeakerTime) / 1000)
+        : null
 
-  if (body.cps > 0) {
-    room.currentSpeaker = body.userName
-    room.speakerCps = body.cps
-    room.lastSpeakerTime = now
-
-    const last = room.lastSpeedUpdate.get(body.userName)
-    if (last) {
-      const delta = Math.min(now - last, 2000)
-      room.speakingTime.set(body.userName, (room.speakingTime.get(body.userName) ?? 0) + delta)
+      return Response.json({
+        waitCount,
+        currentSpeaker: this.s.currentSpeaker,
+        speakerCps: this.s.speakerCps,
+        speedLevel: this.s.speakerCps === 0 ? 'stop' : this.s.speakerCps > 7 ? 'fast' : 'normal',
+        status: waitCount > 3 ? '🚨限界' : waitCount > 0 ? '✋少し待って' : '👍快適',
+        speakingShares: this.getSpeakingShares(),
+        silenceDuration,
+      })
     }
-    room.lastSpeedUpdate.set(body.userName, now)
+
+    if (request.method === 'POST' && url.pathname === '/api/speed') {
+      const body = await request.json<{ userName: string; cps: number }>()
+      if (body.cps > 0) {
+        this.s.currentSpeaker = body.userName
+        this.s.speakerCps = body.cps
+        this.s.lastSpeakerTime = now
+
+        const last = this.s.lastSpeedUpdate[body.userName]
+        if (last) {
+          const delta = Math.min(now - last, 2000)
+          this.s.speakingTime[body.userName] = (this.s.speakingTime[body.userName] ?? 0) + delta
+        }
+        this.s.lastSpeedUpdate[body.userName] = now
+        await this.save()
+      }
+      return Response.json({ success: true })
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/wait') {
+      this.s.clickTimestamps.push(now)
+      await this.save()
+      return Response.json({ success: true, currentCount: this.getActiveWaitCount() })
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/reset') {
+      this.s = {
+        currentSpeaker: '誰も話していません',
+        speakerCps: 0,
+        lastSpeakerTime: 0,
+        clickTimestamps: [],
+        speakingTime: {},
+        lastSpeedUpdate: {},
+      }
+      await this.save()
+      return Response.json({ success: true })
+    }
+
+    return new Response('Not Found', { status: 404 })
   }
-
-  return c.json({ success: true })
-})
-
-app.post('/api/wait', async (c) => {
-  const body = await c.req.json<{ roomId: string }>()
-  if (!body.roomId) return c.json({ error: 'roomId is required' }, 400)
-
-  const room = getRoom(body.roomId)
-  room.clickTimestamps.push(Date.now())
-  return c.json({ success: true, currentCount: getActiveWaitCount(room) })
-})
-
-app.post('/api/reset', async (c) => {
-  const body = await c.req.json<{ roomId?: string }>()
-  if (body.roomId) {
-    rooms.delete(body.roomId)
-  } else {
-    rooms.clear()
-  }
-  return c.json({ success: true })
-})
-
-export default app
+}

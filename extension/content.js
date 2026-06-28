@@ -179,7 +179,8 @@ document.head.appendChild(style);
 // --- 定数 ---
 const SILENCE_THRESHOLD = 5;
 // meet.google.com/xxx-yyyy-zzz からルームIDを取得
-const ROOM_ID = location.pathname.replace('/', '');
+const ROOM_ID = location.pathname.replace(/^\//, '');
+console.log('[PaceKeeper] ROOM_ID:', ROOM_ID);
 
 function getBackendUrl()  { return localStorage.getItem('pacemakerBackendUrl')  || 'http://localhost:8787'; }
 function getApiSecret()   { return localStorage.getItem('pacemakerApiSecret')   || ''; }
