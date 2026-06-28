@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "ウサペース",
+  "version": "1.0",
+  "description": "Google Meetの画面にうさぎを表示するツール",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
