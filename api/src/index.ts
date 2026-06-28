@@ -42,7 +42,12 @@ app.all('/api/*', async (c) => {
 
   const id = c.env.ROOMS.idFromName(roomId)
   const obj = c.env.ROOMS.get(id)
-  return obj.fetch(forwarded)
+  const doRes = await obj.fetch(forwarded)
+  // DO のレスポンスはヘッダーがイミュータブルなので新しい Response に包む
+  return new Response(doRes.body, {
+    status: doRes.status,
+    headers: new Headers(doRes.headers),
+  })
 })
 
 export default app
