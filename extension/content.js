@@ -21,7 +21,7 @@ container.innerHTML = `
     </svg>
   </div>
   <div id="speaker-name" style="font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">話者: 準備中...</div>
-  <div id="cps-display" style="font-size: 14px; margin-top: 4px; font-weight: bold; color: #333;">0 CPS</div>
+  <div id="cps-display" style="font-size: 14px; margin-top: 4px; font-weight: bold; color: #333;">0 CPS(字/秒)</div>
   <div id="room-status" style="font-size: 12px; margin-top: 2px; color: #2ed573; font-weight: bold;">快適</div>
   <button id="wait-btn" style="background: #ff4757; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; margin-top: 12px; font-weight: bold; width: 100%; box-shadow: 0 2px 6px rgba(255,71,87,0.3);">
     待って！
@@ -107,9 +107,19 @@ if (SpeechRecognition) {
   recognition.interimResults = true;
   recognition.continuous = true;
 
-  let segmentStartTime = null;
   let lastSendTime = 0;
+  let lastInterimChars = 0;
+  let charHistory = []; // {time, delta} の直近履歴
   const SEND_INTERVAL_MS = 500;
+  const WINDOW_MS = 3000; // 直近3秒でCPSを計算
+
+  function computeCps(now) {
+    charHistory = charHistory.filter(e => now - e.time <= WINDOW_MS);
+    if (charHistory.length < 2) return null;
+    const duration = (now - charHistory[0].time) / 1000;
+    const total = charHistory.reduce((s, e) => s + e.delta, 0);
+    return duration > 0.3 ? Math.round(total / duration) : null;
+  }
 
   function sendCps(cps) {
     fetch(`${BACKEND_URL}/api/speed`, {
@@ -126,27 +136,30 @@ if (SpeechRecognition) {
       const now = Date.now();
 
       if (!result.isFinal) {
-        if (segmentStartTime === null) segmentStartTime = now;
-        // 500ms間隔でリアルタイム推定を送信
-        const elapsed = (now - segmentStartTime) / 1000;
-        if (chars > 0 && elapsed > 0.1 && now - lastSendTime >= SEND_INTERVAL_MS) {
-          sendCps(Math.round(chars / elapsed));
+        const delta = chars - lastInterimChars;
+        lastInterimChars = chars;
+        if (delta > 0) charHistory.push({ time: now, delta });
+
+        const cps = computeCps(now);
+        console.log(`[interim] "${result[0].transcript}" | ${chars}文字 | ${cps ?? '?'} CPS(字/秒)`);
+        if (cps !== null && now - lastSendTime >= SEND_INTERVAL_MS) {
+          sendCps(cps);
           lastSendTime = now;
         }
       } else {
-        // final確定時に正確なCPSを送信
-        const elapsed = segmentStartTime !== null ? (now - segmentStartTime) / 1000 : null;
-        segmentStartTime = null;
+        const delta = chars - lastInterimChars;
+        if (delta > 0) charHistory.push({ time: now, delta });
+        const cps = computeCps(now);
+        console.log(`[final] "${result[0].transcript}" | ${chars}文字 | ${cps ?? '?'} CPS(字/秒)`);
+        lastInterimChars = 0;
         lastSendTime = 0;
-        if (chars > 0 && elapsed > 0.1) {
-          sendCps(Math.round(chars / elapsed));
-        }
+        if (cps !== null) sendCps(cps);
       }
     }
   };
 
   // 無音で切れても自動再起動
-  recognition.onend = () => { segmentStartTime = null; lastSendTime = 0; recognition.start(); };
+  recognition.onend = () => { lastInterimChars = 0; lastSendTime = 0; charHistory = []; recognition.start(); };
   recognition.start();
 } else {
   console.error('このブラウザはWeb Speech APIをサポートしていません。');
@@ -162,7 +175,7 @@ setInterval(async () => {
     const roomStatusEl = document.getElementById('room-status');
 
     if (speakerEl) speakerEl.innerText = `話者: ${data.currentSpeaker}`;
-    if (cpsEl) cpsEl.innerText = `${data.speakerCps} CPS`;
+    if (cpsEl) cpsEl.innerText = `${data.speakerCps} CPS(字/秒)`;
     if (roomStatusEl) {
       roomStatusEl.innerText = `${data.status} (${data.waitCount})`;
       roomStatusEl.style.color = data.waitCount > 3 ? '#ff4757' : data.waitCount > 0 ? '#ffa502' : '#2ed573';
