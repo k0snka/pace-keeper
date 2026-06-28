@@ -77,14 +77,45 @@ const settingsItems = [
   ['showShares',   '発話占有率'],
   ['showSilence',  '無言インジケーター'],
 ];
-settingsPanel.innerHTML = `<div style="font-weight:bold;color:#666;margin-bottom:8px;">表示設定</div>` +
+const inputCss = 'width:100%;font-size:11px;border:1px solid #ccc;border-radius:4px;padding:3px 4px;box-sizing:border-box;margin-top:2px;';
+settingsPanel.innerHTML =
+  `<div style="font-weight:bold;color:#666;margin-bottom:8px;">表示設定</div>` +
   settingsItems.map(([key, label]) => `
     <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;cursor:pointer;">
       <input type="checkbox" data-key="${key}" ${settings[key] ? 'checked' : ''} style="cursor:pointer;">
       <span>${label}</span>
     </label>
-  `).join('');
+  `).join('') +
+  `<hr style="border:none;border-top:1px solid #eee;margin:8px 0;">
+  <div style="font-weight:bold;color:#666;margin-bottom:6px;">接続設定</div>
+  <div style="margin-bottom:6px;">
+    <div style="font-size:11px;color:#888;">Backend URL</div>
+    <input id="setting-url" type="text" placeholder="http://localhost:8787" style="${inputCss}">
+  </div>
+  <div style="margin-bottom:6px;">
+    <div style="font-size:11px;color:#888;">API Secret</div>
+    <input id="setting-secret" type="password" placeholder="(未設定)" style="${inputCss}">
+  </div>
+  <button id="setting-save" style="width:100%;font-size:11px;padding:4px;border:none;border-radius:4px;background:#3742fa;color:white;cursor:pointer;">保存</button>
+  <div id="setting-saved" style="font-size:10px;color:#2ed573;text-align:center;margin-top:4px;display:none;">保存しました</div>`;
 container.appendChild(settingsPanel);
+
+// 現在値を反映
+settingsPanel.querySelector('#setting-url').value = localStorage.getItem('pacemakerBackendUrl') || '';
+settingsPanel.querySelector('#setting-secret').value = localStorage.getItem('pacemakerApiSecret') || '';
+
+settingsPanel.querySelector('#setting-save').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const url = settingsPanel.querySelector('#setting-url').value.trim();
+  const secret = settingsPanel.querySelector('#setting-secret').value.trim();
+  if (url) localStorage.setItem('pacemakerBackendUrl', url);
+  else localStorage.removeItem('pacemakerBackendUrl');
+  if (secret) localStorage.setItem('pacemakerApiSecret', secret);
+  else localStorage.removeItem('pacemakerApiSecret');
+  const saved = settingsPanel.querySelector('#setting-saved');
+  saved.style.display = 'block';
+  setTimeout(() => { saved.style.display = 'none'; }, 2000);
+});
 
 settingsPanel.querySelectorAll('input[type=checkbox]').forEach(cb => {
   cb.addEventListener('change', () => {
@@ -146,14 +177,15 @@ style.innerHTML = `
 document.head.appendChild(style);
 
 // --- 定数 ---
-const BACKEND_URL = 'http://localhost:8787';
-const API_SECRET = 'ここにシークレットを入力';
-const SILENCE_THRESHOLD = 5; // 無言N秒で「話せます」表示
+const SILENCE_THRESHOLD = 5;
+
+function getBackendUrl()  { return localStorage.getItem('pacemakerBackendUrl')  || 'http://localhost:8787'; }
+function getApiSecret()   { return localStorage.getItem('pacemakerApiSecret')   || ''; }
 
 function apiFetch(path, options = {}) {
-  return fetch(`${BACKEND_URL}${path}`, {
+  return fetch(`${getBackendUrl()}${path}`, {
     ...options,
-    headers: { 'x-api-secret': API_SECRET, ...(options.headers ?? {}) },
+    headers: { 'x-api-secret': getApiSecret(), ...(options.headers ?? {}) },
   });
 }
 
