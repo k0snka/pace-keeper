@@ -36,8 +36,8 @@ app.get('/api/room-status', (c) => {
     waitCount: currentWaitCount,
     currentSpeaker,
     speakerCps,
-    speedLevel: speakerCps === 0 ? 'stop' : speakerCps > 5 ? 'fast' : 'normal',
-    status: currentWaitCount > 3 ? '🚨限界' : currentWaitCount > 0 ? '🐢少し待って' : '🐰快適'
+    speedLevel: speakerCps === 0 ? 'stop' : speakerCps > 7 ? 'fast' : 'normal',
+    status: currentWaitCount > 3 ? '🚨限界' : currentWaitCount > 0 ? '✋少し待って' : '👍快適'
   })
 })
 
