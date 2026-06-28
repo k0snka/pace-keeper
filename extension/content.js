@@ -15,6 +15,7 @@ container.style.userSelect = 'none';
 
 container.innerHTML = `
   <div style="font-size: 11px; font-weight: bold; color: #666; margin-bottom: 4px;">ペースメーカー</div>
+  <div id="my-name-display" style="font-size: 11px; color: #aaa; margin-bottom: 2px; cursor: pointer;" title="クリックして名前を変更"></div>
   <div id="rabbit-svg-wrap" style="display: inline-block; margin: 8px 0; width: 60px; height: 60px;">
     <svg id="rabbit-svg" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg" width="60" height="60">
       <rect id="spin-rect" x="15" y="15" width="30" height="30" rx="4" fill="#333" style="transform-origin:30px 30px;" />
@@ -67,8 +68,39 @@ document.head.appendChild(style);
 
 const BACKEND_URL = 'http://localhost:8787';
 
-// [data-self-name] は Google Meet が自分の名前に付与する属性
-const MY_NAME = document.querySelector('[data-self-name]')?.innerText || "参加者_" + Math.floor(Math.random() * 100);
+if (!localStorage.getItem('pacemakerUserId')) {
+  localStorage.setItem('pacemakerUserId', 'user_' + Math.random().toString(36).slice(2, 8));
+}
+let MY_NAME = localStorage.getItem('pacemakerUserId');
+
+updateMyNameDisplay();
+
+function updateMyNameDisplay() {
+  const el = document.getElementById('my-name-display');
+  if (el) el.innerText = MY_NAME;
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.id !== 'my-name-display') return;
+  const input = document.createElement('input');
+  input.value = MY_NAME;
+  input.style.cssText = 'width:100%;font-size:11px;text-align:center;border:1px solid #ccc;border-radius:4px;padding:2px;box-sizing:border-box;';
+  e.target.replaceWith(input);
+  input.focus();
+  input.select();
+  function commit() {
+    const name = input.value.trim();
+    if (name) { MY_NAME = name; localStorage.setItem('pacemakerUserId', name); }
+    const div = document.createElement('div');
+    div.id = 'my-name-display';
+    div.style.cssText = 'font-size:11px;color:#aaa;margin-bottom:2px;cursor:pointer;';
+    div.title = 'クリックして名前を変更';
+    div.innerText = MY_NAME;
+    input.replaceWith(div);
+  }
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+});
 
 let animationInterval = null;
 let currentRotation = 0;
